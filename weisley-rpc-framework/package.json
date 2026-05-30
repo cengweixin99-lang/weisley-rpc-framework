@@ -1,0 +1,21 @@
+{
+  "name": "weisley-rpc-framework",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A lightweight RPC framework built with Node.js and TypeScript for learning RPC internals.",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:server": "pnpm --filter @weisley-rpc/example dev:server",
+    "dev:client": "pnpm --filter @weisley-rpc/example dev:client",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "packageManager": "pnpm@9.12.3"
+}
