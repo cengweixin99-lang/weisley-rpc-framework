@@ -11,12 +11,14 @@ export class MethodInvoker {
       const result = await method(...request.params);
 
       return {
+        type: "response",
         id: request.id,
         ok: true,
         result,
       };
     } catch (error) {
       return {
+        type: "response",
         id: request.id,
         ok: false,
         error: this.toRpcError(error),

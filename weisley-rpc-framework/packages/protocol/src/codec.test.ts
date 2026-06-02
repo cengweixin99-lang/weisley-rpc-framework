@@ -8,6 +8,7 @@ describe("RpcCodec", () => {
     const codec = new RpcCodec();
 
     const request: RpcRequest = {
+      type: "request",
       id: "req-1",
       service: "UserService",
       method: "getUser",
@@ -26,6 +27,7 @@ describe("RpcCodec", () => {
     const decoder = new RpcCodec();
 
     const request: RpcRequest = {
+      type: "request",
       id: "req-1",
       service: "UserService",
       method: "getUser",
@@ -44,6 +46,7 @@ describe("RpcCodec", () => {
     const decoder = new RpcCodec();
 
     const request: RpcRequest = {
+      type: "request",
       id: "req-1",
       service: "UserService",
       method: "getUser",
@@ -63,6 +66,7 @@ describe("RpcCodec", () => {
     const decoder = new RpcCodec();
 
     const request1: RpcRequest = {
+      type: "request",
       id: "req-1",
       service: "UserService",
       method: "getUser",
@@ -70,6 +74,7 @@ describe("RpcCodec", () => {
     };
 
     const request2: RpcRequest = {
+      type: "request",
       id: "req-2",
       service: "UserService",
       method: "getUser",

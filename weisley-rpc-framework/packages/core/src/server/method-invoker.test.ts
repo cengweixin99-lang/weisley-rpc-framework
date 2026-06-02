@@ -15,6 +15,7 @@ describe("MethodInvoker", () => {
     });
 
     const request: RpcRequest = {
+      type: "request",
       id: "req-1",
       service: "UserService",
       method: "getUser",
@@ -24,6 +25,7 @@ describe("MethodInvoker", () => {
     const response = await invoker.invoke(request);
 
     expect(response).toEqual({
+      type: "response",
       id: "req-1",
       ok: true,
       result: { id: 1, name: "Alice" },
@@ -39,15 +41,17 @@ describe("MethodInvoker", () => {
         return a + b;
       },
     });
-
-    const response = await invoker.invoke({
+    const request: RpcRequest = {
+      type: "request",
       id: "req-2",
       service: "MathService",
       method: "add",
       params: [1, 2],
-    });
+    };
+    const response = await invoker.invoke(request);
 
     expect(response).toEqual({
+      type: "response",
       id: "req-2",
       ok: true,
       result: 3,
@@ -58,12 +62,14 @@ describe("MethodInvoker", () => {
     const registry = new ServiceRegistry();
     const invoker = new MethodInvoker(registry);
 
-    const response = await invoker.invoke({
+    const request: RpcRequest = {
+      type: "request",
       id: "req-3",
       service: "MissingService",
       method: "getUser",
       params: [],
-    });
+    };
+    const response = await invoker.invoke(request);
 
     expect(response.ok).toBe(false);
     expect(response.id).toBe("req-3");
@@ -79,13 +85,14 @@ describe("MethodInvoker", () => {
         throw new Error("database failed");
       },
     });
-
-    const response = await invoker.invoke({
+    const request: RpcRequest = {
+      type: "request",
       id: "req-4",
       service: "UserService",
       method: "getUser",
       params: [],
-    });
+    }
+    const response = await invoker.invoke(request);
 
     expect(response.ok).toBe(false);
     expect(response.id).toBe("req-4");

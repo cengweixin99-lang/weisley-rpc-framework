@@ -1,7 +1,12 @@
 import { Socket } from "node:net";
 import { describe, expect, it } from "vitest";
-import { HEADER_LENGTH, MAX_PACKET_LENGTH, RpcCodec, type RpcResponse } from "@weisley-rpc/protocol";
-import { RpcServer } from "./rpc-server.js";
+import {
+  HEADER_LENGTH,
+  MAX_PACKET_LENGTH,
+  RpcCodec,
+  type RpcPong,
+  type RpcResponse,
+} from "@weisley-rpc/protocol";import { RpcServer } from "./rpc-server.js";
 
 function getServerPort(server: RpcServer): number {
   const address = server.address();
@@ -60,6 +65,7 @@ describe("RpcServer", () => {
 
     socket.write(
       codec.encode({
+        type: "request",
         id: "req-1",
         service: "UserService",
         method: "getUser",
@@ -70,6 +76,7 @@ describe("RpcServer", () => {
     const response = await responsePromise;
 
     expect(response).toEqual({
+      type: "response",
       id: "req-1",
       ok: true,
       result: { id: 1, name: "Alice" },
@@ -137,6 +144,7 @@ describe("RpcServer", () => {
     });
     validSocket.write(
       codec.encode({
+        type: "request",
         id: "req-1",
         service: "UserService",
         method: "getUser",
@@ -145,11 +153,53 @@ describe("RpcServer", () => {
     );
     const response = await responsePromise;
     expect(response).toEqual({
+      type: "response",
       id: "req-1",
       ok: true,
       result: { id: 1, name: "Alice" },
     });
     validSocket.end();
+    await server.close();
+  });
+  it("returns pong for ping message", async () => {
+    const server = new RpcServer();
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+    const port = getServerPort(server);
+
+    const socket = await connectSocket(port);
+    const codec = new RpcCodec();
+
+    const pongPromise = new Promise<RpcPong>((resolve, reject) => {
+      socket.once("error", reject);
+      socket.on("data", (chunk) => {
+        const messages = codec.push(chunk);
+        const pong = messages.find((message) => message.type === "pong");
+
+        if (pong) {
+          resolve(pong);
+        }
+      });
+    });
+
+    socket.write(
+      codec.encode({
+        type: "ping",
+        id: "ping-1",
+        timestamp: 123,
+      }),
+    );
+
+    const pong = await pongPromise;
+
+    expect(pong).toMatchObject({
+      type: "pong",
+      id: "ping-1",
+    });
+
+    expect(pong.timestamp).toEqual(expect.any(Number));
+
+    socket.end();
     await server.close();
   });
 });

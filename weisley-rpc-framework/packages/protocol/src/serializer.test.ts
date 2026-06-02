@@ -6,6 +6,7 @@ describe("JsonSerializer", () => {
     it("serializes and deserializers RpcRequest", () => {
         const serializer = new JsonSerializer();
         const request: RpcRequest = {
+            type: "request",
             id: "req-1",
             service: "UserService",
             method: "getUser",
@@ -25,6 +26,7 @@ describe("JsonSerializer", () => {
     it("serializes and deserializers RpcResponse", () => {
         const serializer = new JsonSerializer();
         const response: RpcResponse = {
+            type: "response",
             id: "req-1",
             ok: true,
             result: {

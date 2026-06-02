@@ -9,11 +9,13 @@ export class RpcClient {
   private readonly connection: RpcConnection;
 
   constructor(options: RpcClientOptions) {
-    this.connection = new RpcConnection(
-      options.host,
-      options.port,
-      options.timeoutMs ?? 5000,
-    );
+    this.connection = new RpcConnection({
+      host: options.host,
+      port: options.port,
+      timeoutMs: options.timeoutMs ?? 5000,
+      heartbeatIntervalMs: options.heartbeatIntervalMs,
+      heartbeatTimeoutMs: options.heartbeatTimeoutMs,
+    });
   }
 
   async connect(): Promise<void> {
@@ -27,6 +29,7 @@ export class RpcClient {
   ): Promise<unknown> {
     // : Build RpcRequest, encode it, and send it through RpcConnection.
     const request: RpcRequest = {
+      type: "request",
       id: randomUUID(),
       service,
       method,

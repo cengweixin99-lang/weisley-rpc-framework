@@ -53,11 +53,22 @@ export class RpcServer {
 
       socket.on("data", async (chunk) => {
         try{
-          const messages = codec.push(chunk) as RpcRequest[];
-
+          const messages = codec.push(chunk);
+          
           for (const message of messages) {
-            const response = await this.invoker.invoke(message);
-            socket.write(codec.encode(response));
+            if(message.type === "request") {
+              const response = await this.invoker.invoke(message);
+              socket.write(codec.encode(response));
+            }
+            if(message.type === "ping") {
+              socket.write(
+                codec.encode({
+                  type: "pong",
+                  id: message.id,
+                  timestamp: Date.now(),
+                }),
+              );
+            }
             }
           } catch {
             socket.destroy();

@@ -5,6 +5,8 @@ const client = new RpcClient({
   host: "127.0.0.1",
   port: 4000,
   timeoutMs: 3000,
+  heartbeatIntervalMs: 1000,
+  heartbeatTimeoutMs: 3000,
 });
 
 await client.connect();

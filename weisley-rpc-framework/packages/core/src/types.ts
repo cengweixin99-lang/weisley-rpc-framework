@@ -4,6 +4,8 @@ export type RpcClientOptions = {
   host: string;
   port: number;
   timeoutMs?: number;
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
 };
 
 export type RpcServerOptions = {
