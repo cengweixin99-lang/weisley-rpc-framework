@@ -1,4 +1,4 @@
-import { createServer, type AddressInfo, type Server, type Socket } from "node:net";
+import { createServer, Socket, type AddressInfo, type Server } from "node:net";
 import { RpcCodec, type RpcRequest } from "@weisley-rpc/protocol";
 import type { RpcServerOptions, ServiceImplementation } from "../types.js";
 import { MethodInvoker } from "./method-invoker.js";
@@ -8,6 +8,7 @@ export class RpcServer {
   private readonly registry = new ServiceRegistry();
   private readonly invoker = new MethodInvoker(this.registry);
   private server: Server | null = null;
+  private readonly sockets = new Set<Socket>();
 
   registerService(serviceName: string, implementation: ServiceImplementation): void {
     this.registry.register(serviceName, implementation);
@@ -35,7 +36,7 @@ export class RpcServer {
     if (!this.server) {
       return;
     }
-
+    this.closeConnections();
     await new Promise<void>((resolve, reject) => {
       this.server?.close((error) => {
         if (error) {
@@ -46,9 +47,17 @@ export class RpcServer {
       });
     });
   }
-
+  closeConnections(): void {
+    for (const socket of this.sockets) {
+      socket.destroy();
+    }
+    this.sockets.clear();
+  }
   private handleConnection(socket: Socket): void {
-   
+      this.sockets.add(socket);
+      socket.on("close", () => {
+        this.sockets.delete(socket);
+      });
       const codec = new RpcCodec();
 
       socket.on("data", async (chunk) => {

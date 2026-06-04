@@ -6,9 +6,14 @@ export type RpcClientOptions = {
   timeoutMs?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
+  reconnect?: boolean;
+  reconnectInitialDelayMs?: number;
+  reconnectMaxDelayMs?: number;
 };
 
 export type RpcServerOptions = {
   host?: string;
   port: number;
 };
+
+export type ConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "closed";

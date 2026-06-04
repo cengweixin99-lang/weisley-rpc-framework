@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { RpcCodec, type RpcRequest } from "@weisley-rpc/protocol";
-import type { RpcClientOptions } from "../types.js";
+import type { ConnectionState, RpcClientOptions } from "../types.js";
 import { createProxy, type RpcProxy } from "./proxy.js";
 import { RpcConnection } from "./connection.js";
 
@@ -15,11 +15,18 @@ export class RpcClient {
       timeoutMs: options.timeoutMs ?? 5000,
       heartbeatIntervalMs: options.heartbeatIntervalMs,
       heartbeatTimeoutMs: options.heartbeatTimeoutMs,
+      reconnect: options.reconnect,
+      reconnectInitialDelayMs: options.reconnectInitialDelayMs,
+      reconnectMaxDelayMs: options.reconnectMaxDelayMs
     });
   }
 
   async connect(): Promise<void> {
     await this.connection.connect();
+  }
+
+  getConnectionState(): ConnectionState {
+    return this.connection.getState();
   }
 
   async call(

@@ -3,12 +3,17 @@ import { RpcCodec, type RpcResponse } from "@weisley-rpc/protocol";
 import { RpcError, RpcTimeoutError } from "../errors.js";
 import type { PendingRequest } from "./pending-request.js";
 import { randomUUID } from "node:crypto";
+import type { ConnectionState } from "../types.js";
+
 type RpcConnectionOptions = {
   host: string;
   port: number;
   timeoutMs: number;
   heartbeatIntervalMs?: number | undefined;
   heartbeatTimeoutMs?: number | undefined;
+  reconnect?: boolean | undefined;
+  reconnectInitialDelayMs?: number | undefined;
+  reconnectMaxDelayMs?: number | undefined;
 };
 
 export class RpcConnection {
@@ -17,35 +22,88 @@ export class RpcConnection {
   private socket: Socket | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private lastPongAt = 0;
-
+  private state: ConnectionState = "idle";
+  private manuallyClosed = false;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempts = 0;
   constructor(private readonly options: RpcConnectionOptions) {}
+
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) {
+      return;
+    }
+    if (this.options.reconnect === false) {
+      return;
+    }
+    const initialDelay = this.options.reconnectInitialDelayMs ?? 100;
+    const maxDelay = this.options.reconnectMaxDelayMs ?? 2000;
+    const delay = Math.min(
+      initialDelay * 2 ** this.reconnectAttempts,
+      maxDelay,
+    );
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      if (this.manuallyClosed) {
+        return;
+      }
+      try {
+        await this.connect();
+        this.reconnectAttempts = 0;
+      } catch {
+        this.state = "reconnecting";
+        this.scheduleReconnect();
+      }
+    }, delay);
+  }
+
+  private handleUnexpectedDisconnect(error: Error) {
+    this.stopHeartbeat();
+    this.rejectAll(error);
+    if (this.manuallyClosed) {
+      return;
+    }
+    this.state = "reconnecting";
+    this.scheduleReconnect();
+  }
+
+  getState(): ConnectionState {
+    return this.state;
+  }
 
   async connect(): Promise<void> {
     if (this.socket && !this.socket.destroyed) {
       return;
     }
-
+    this.manuallyClosed = false;
+    this.state = "connecting";
     this.socket = createConnection({ host: this.options.host, port: this.options.port, timeout: this.options.timeoutMs});
     this.socket.on("data", (chunk) => this.handleData(chunk));
     this.socket.on("close", () => {
-      this.stopHeartbeat();
-      this.rejectAll(new RpcError("Connection closed", "CONNECTION_CLOSED"))
+      this.handleUnexpectedDisconnect(
+        new RpcError("Connection closed", "CONNECTION_CLOSED"),
+      )
     });
     this.socket.on("error", (error) => {
-      this.stopHeartbeat();
-      this.rejectAll(error)
+      this.handleUnexpectedDisconnect(error);
     });
 
     await new Promise<void>((resolve, reject) => {
       this.socket?.once("connect", resolve);
       this.socket?.once("error", reject);
     });
+    this.state = "connected";
+    this.reconnectAttempts = 0;
     this.startHeartbeat();
   }
 
   send(id: string, payload: Buffer): Promise<unknown> {
     if (!this.socket || this.socket.destroyed) {
       return Promise.reject(new RpcError("Connection is not open", "CONNECTION_NOT_OPEN"));
+    }
+    if (this.state !== "connected") {
+      return Promise.reject(new RpcError("Connection is not connected", "CONNECTION_NOT_CONNECTED"));
     }
 
     return new Promise((resolve, reject) => {
@@ -60,7 +118,15 @@ export class RpcConnection {
   }
 
   close(): void {
+    this.manuallyClosed = true;
+    this.state = "closed";
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.stopHeartbeat();
+    this.rejectAll(new RpcError("Connection closed", "CONNECTION_CLOSED"))
     this.socket?.end();
   }
 
@@ -78,8 +144,7 @@ export class RpcConnection {
       const timeoutMs = this.options.heartbeatTimeoutMs ?? intervalMs * 2;
       if (Date.now() - this.lastPongAt > timeoutMs) {
         const error = new RpcError("Heartbeat timeout","HEARTBEAT_TIMEOUT");
-        this.stopHeartbeat();
-        this.rejectAll(error);
+        this.handleUnexpectedDisconnect(error);
         this.socket.destroy(error);
         return;
       } 

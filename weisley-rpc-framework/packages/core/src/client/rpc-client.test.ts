@@ -47,6 +47,29 @@ function getServerPort(server: RpcServer): number {
 }
 
 describe("RpcClient", () => {
+  it("tracks connection state across connect and close", async () => {
+    const server = new RpcServer();
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+    });
+
+    expect(client.getConnectionState()).toBe("idle");
+
+    await client.connect();
+
+    expect(client.getConnectionState()).toBe("connected");
+
+    client.close();
+
+    expect(client.getConnectionState()).toBe("closed");
+
+    await server.close();
+  });
+
   it("calls a remote service method", async () => {
     const server = new RpcServer();
 
@@ -219,4 +242,107 @@ describe("RpcClient", () => {
         });
       });
     });
+
+    it("does not reconnect after manual close", async () => {
+      const server = new RpcServer();
+      await server.listen({ host: "127.0.0.1", port: 0 });
+
+      const client = new RpcClient({
+        host: "127.0.0.1",
+        port: getServerPort(server),
+        timeoutMs: 1000,
+        reconnectInitialDelayMs: 10,
+        reconnectMaxDelayMs: 20,
+      });
+
+      await client.connect();
+
+      expect(client.getConnectionState()).toBe("connected");
+
+      client.close();
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(client.getConnectionState()).toBe("closed");
+
+      await server.close();
+    });
+
+    
+    it("enters reconnecting when connection is closed unexpectedly", async () => {
+      const server = new RpcServer();
+      await server.listen({ host: "127.0.0.1", port: 0 });
+
+      const client = new RpcClient({
+        host: "127.0.0.1",
+        port: getServerPort(server),
+        timeoutMs: 1000,
+        reconnectInitialDelayMs: 50,
+        reconnectMaxDelayMs: 50,
+      });
+
+      await client.connect();
+      expect(client.getConnectionState()).toBe("connected");
+
+      server.closeConnections();
+      
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(client.getConnectionState()).toBe("reconnecting");
+
+      client.close();
+      await server.close();
+
+    })
+
+    it("reconnects when server comes back on the same port", async () => {
+      const server1 = new RpcServer();
+
+      server1.registerService("UserService", {
+        async getUser(id: number) {
+          return { id, name: "Alice"};
+        },
+      });
+
+      await server1.listen({ host: "127.0.0.1", port: 0 });
+      const port = getServerPort(server1);
+
+      const client = new RpcClient({
+        host: "127.0.0.1",
+        port,
+        timeoutMs: 1000,
+        reconnectInitialDelayMs: 20,
+        reconnectMaxDelayMs: 20,
+      });
+
+      await client.connect();
+
+      expect(client.getConnectionState()).toBe("connected");
+
+      server1.closeConnections();
+      await server1.close();
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      expect(client.getConnectionState()).toBe("reconnecting");
+
+      const server2 = new RpcServer();
+      server2.registerService("UserService", {
+        async getUser(id: number) {
+          return { id, name: "Bob"};
+        },
+      });
+
+      await server2.listen({ host: "127.0.0.1", port: port });
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      
+      expect(client.getConnectionState()).toBe("connected");
+
+      const result = await client.call("UserService", "getUser", [1]);
+      expect(result).toEqual({ id: 1, name: "Bob" });
+
+      client.close();
+      await server2.close();
+    })
 });
