@@ -2,6 +2,7 @@ import { RpcClient } from "@weisley-rpc/core";
 import type { UserService } from "./share/user-service.js";
 
 const client = new RpcClient({
+  mode: "direct",
   host: "127.0.0.1",
   port: 4000,
   timeoutMs: 3000,

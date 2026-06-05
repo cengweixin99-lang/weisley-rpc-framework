@@ -4,3 +4,6 @@ export * from "./client/rpc-client.js";
 export * from "./client/proxy.js";
 export * from "./server/rpc-server.js";
 export * from "./server/service-registry.js";
+export * from "./discovery/types.js";
+export * from "./discovery/static-registry.js";
+export * from "./discovery/round-robin-load-balancer.js";
