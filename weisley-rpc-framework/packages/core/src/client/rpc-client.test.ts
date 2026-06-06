@@ -447,4 +447,121 @@ describe("RpcClient", () => {
     client.close();
     await server.close();
   });
+
+  it ("does not fail over for non-retryable rpc errors", async () => {
+    const server1 = new RpcServer();
+    const server2 = new RpcServer();
+    server1.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    server2.registerService("UserService", {
+      async missingMethod() {
+        return "should not be called";
+      },
+    });
+
+    await server1.listen({ host: "127.0.0.1", port: 0 });
+    await server2.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: getServerPort(server1) },
+          { host: "127.0.0.1", port: getServerPort(server2) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 1000,
+    });
+
+    await expect(client.call("UserService", "missingMethod", [])).rejects.toMatchObject({
+      code: "METHOD_NOT_FOUND",
+    });
+    client.close();
+    await server1.close();
+    await server2.close();
+  });
+
+  it ("throw last error when all discovered endpoints are unavailable", async () => {
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: 65530 },
+          { host: "127.0.0.1", port: 65531 },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+      reconnect: false,
+    });
+
+    await expect(client.call("UserService", "getUser", [1])).rejects.toMatchObject({
+      code: "ECONNREFUSED",
+    });
+    client.close();
+  });
+
+  it ("rejects when no endpoint is discovered", async () => {
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({}),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+    });
+
+    await expect(client.call("UserService", "getUser", [1])).rejects.toThrow(
+      "No available endpoint for service: UserService",
+    );
+
+    client.close();
+  });
+  it("uses custom retry policy in discovery failover", async () => {
+    const server1 = new RpcServer();
+    const server2 = new RpcServer();
+
+    server1.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    server2.registerService("UserService", {
+      async missingMethod() {
+        return "called by custom retry policy";
+      },
+    });
+
+    await server1.listen({ host: "127.0.0.1", port: 0 });
+    await server2.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: getServerPort(server1) },
+          { host: "127.0.0.1", port: getServerPort(server2) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 1000,
+      retryPolicy: {
+        shouldRetry() {
+          return true;
+        },
+      },
+    });
+
+    const result = await client.call("UserService", "missingMethod", []);
+
+    expect(result).toBe("called by custom retry policy");
+
+    client.close();
+    await server1.close();
+    await server2.close();
+  });
 });

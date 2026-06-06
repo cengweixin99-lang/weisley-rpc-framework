@@ -3,12 +3,15 @@ import { RpcCodec, type RpcRequest } from "@weisley-rpc/protocol";
 import type { ConnectionState, RpcClientOptions } from "../types.js";
 import { createProxy, type RpcProxy } from "./proxy.js";
 import { RpcConnection } from "./connection.js";
-
+import { DefaultRetryPolicy, type RetryPolicy } from "./retry-policy.js";
 export class RpcClient {
   private readonly codec = new RpcCodec();
   private readonly connections = new Map<string, RpcConnection>();
+  private readonly retryPolicy: RetryPolicy;
 
-  constructor(private readonly options: RpcClientOptions) {}
+  constructor(private readonly options: RpcClientOptions) {
+    this.retryPolicy = options.retryPolicy ?? new DefaultRetryPolicy();
+  }
 
   async connect(): Promise<void> {
     if (this.options.mode === "discovery") {
@@ -74,6 +77,9 @@ export class RpcClient {
         return await connection.send(request.id, this.codec.encode(request));
       } catch (error) {
         lastError = error;
+        if (!this.retryPolicy.shouldRetry(error)) {
+          throw error;
+        }
       }
     }
 
@@ -105,6 +111,28 @@ export class RpcClient {
     return this.getOrCreateConnection(endpoint.host, endpoint.port);
   } */
 
+  // private isRetryableError(error: unknown): boolean {
+  //   if (error instanceof RpcError) {
+  //     return [
+  //       "CONNECTION_CLOSED",
+  //       "CONNECTION_NOT_OPEN",
+  //       "CONNECTION_NOT_CONNECTIED",
+  //       "RPC_TIMEOUT",
+  //       "HEARTBEAT_TIMEOUT",
+  //     ].includes(error.code);
+  //   }
+  //   if (error && typeof error === "object" && "code" in error) {
+  //     const code = String(error.code);
+  //     return [
+  //       "ECONNREFUSED",
+  //       "ECONNRESET",
+  //       "ETIMEOUT",
+  //       "EPIPE",
+  //     ].includes(code);
+  //   }
+  //   return false;
+  // }
+  
   private getOrCreateConnection(host: string, port: number): RpcConnection {
     const key = this.getEndpointKey(host, port);
     const existing = this.connections.get(key);

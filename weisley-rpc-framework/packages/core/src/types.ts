@@ -1,5 +1,5 @@
 import type { LoadBalancer, Registry } from "./discovery/types.js";
-
+import type { RetryPolicy } from "./client/retry-policy.js";
 export type ServiceImplementation = Record<string, (...args: any[]) => unknown | Promise<unknown>>;
 
 export type CommonRpcClientOptions = {
@@ -9,6 +9,8 @@ export type CommonRpcClientOptions = {
   reconnect?: boolean;
   reconnectInitialDelayMs?: number;
   reconnectMaxDelayMs?: number;
+  retryPolicy?: RetryPolicy;
+
 };
 
 export type DirectRpcClientOptions = CommonRpcClientOptions & {
@@ -17,10 +19,12 @@ export type DirectRpcClientOptions = CommonRpcClientOptions & {
   port: number;
 };
 
-export type DiscoveryRpcClientOptions = CommonRpcClientOptions & {
+export type DiscoveryRpcClientOptions
+= CommonRpcClientOptions & {
   mode: "discovery";
   registry: Registry;
   loadBalancer: LoadBalancer;
+
 };
 
 export type RpcClientOptions = DirectRpcClientOptions | DiscoveryRpcClientOptions;
