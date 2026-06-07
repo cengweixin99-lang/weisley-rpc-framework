@@ -4,9 +4,11 @@ import type { ConnectionState, RpcClientOptions } from "../types.js";
 import { createProxy, type RpcProxy } from "./proxy.js";
 import { RpcConnection } from "./connection.js";
 import { DefaultRetryPolicy, type RetryPolicy } from "./retry-policy.js";
+import { RpcConnectionPool } from "./connection-pool.js";
 export class RpcClient {
   private readonly codec = new RpcCodec();
-  private readonly connections = new Map<string, RpcConnection>();
+  // private readonly connections = new Map<string, RpcConnection>();
+  private readonly pools = new Map<string, RpcConnectionPool>();
   private readonly retryPolicy: RetryPolicy;
 
   constructor(private readonly options: RpcClientOptions) {
@@ -18,7 +20,7 @@ export class RpcClient {
       return;
     }
 
-    const connection = this.getOrCreateConnection(this.options.host, this.options.port);
+    const connection = this.getConnection(this.options.host, this.options.port);
     await connection.connect();
   }
 
@@ -27,8 +29,8 @@ export class RpcClient {
       return "idle";
     }
 
-    const connection = this.connections.get(this.getEndpointKey(this.options.host, this.options.port));
-    return connection?.getState() ?? "idle";
+    const pool = this.pools.get(this.getEndpointKey(this.options.host, this.options.port));
+    return pool?.getState() ?? "idle";
   }
 
   async call(
@@ -54,7 +56,7 @@ export class RpcClient {
     if (this.options.mode !== "direct") {
       throw new Error("RpcClient is not in direct mode");
     }
-    const connection = this.getOrCreateConnection(this.options.host, this.options.port);
+    const connection = this.getConnection(this.options.host, this.options.port);
     if (connection.getState() !== "connected") {
       await connection.connect();
     }
@@ -69,7 +71,7 @@ export class RpcClient {
     let lastError: unknown;
     for (let attempt = 0; attempt < endpoints.length; attempt += 1) {
       const endpoint = this.options.loadBalancer.select(serviceName, endpoints);
-      const connection = this.getOrCreateConnection(endpoint.host, endpoint.port);
+      const connection = this.getConnection(endpoint.host, endpoint.port);
       try {
         if (connection.getState() !== "connected") {
           await connection.connect();
@@ -77,7 +79,12 @@ export class RpcClient {
         return await connection.send(request.id, this.codec.encode(request));
       } catch (error) {
         lastError = error;
-        if (!this.retryPolicy.shouldRetry(error)) {
+        if (!this.retryPolicy.shouldRetry(error, {
+          serviceName,
+          attempt: attempt + 1,
+          maxAttempts: endpoints.length,
+          endpoint,
+        })) {
           throw error;
         }
       }
@@ -96,8 +103,8 @@ export class RpcClient {
   }
 
   close(): void {
-    for (const connection of this.connections.values()) {
-      connection.close();
+    for (const pool of this.pools.values()) {
+      pool.close();
     }
   }
 
@@ -133,28 +140,51 @@ export class RpcClient {
   //   return false;
   // }
   
-  private getOrCreateConnection(host: string, port: number): RpcConnection {
+  // private getOrCreateConnection(host: string, port: number): RpcConnection {
+  //   const key = this.getEndpointKey(host, port);
+  //   const existing = this.connections.get(key);
+
+  //   if (existing) {
+  //     return existing;
+  //   }
+
+  //   const connection = new RpcConnection({
+  //     host,
+  //     port,
+  //     timeoutMs: this.options.timeoutMs ?? 5000,
+  //     heartbeatIntervalMs: this.options.heartbeatIntervalMs,
+  //     heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
+  //     reconnect: this.options.reconnect,
+  //     reconnectInitialDelayMs: this.options.reconnectInitialDelayMs,
+  //     reconnectMaxDelayMs: this.options.reconnectMaxDelayMs,
+  //   });
+
+  //   this.connections.set(key, connection);
+
+  //   return connection;
+  // }
+
+  private getConnection(host: string, port: number): RpcConnection {
     const key = this.getEndpointKey(host, port);
-    const existing = this.connections.get(key);
+    let pool = this.pools.get(key);
 
-    if (existing) {
-      return existing;
+    if (!pool) {
+      pool = new RpcConnectionPool({
+        host,
+        port,
+        maxConnections: this.options.maxConnectionsPerEndpoint ?? 1,
+        connectionOptions: {
+          timeoutMs: this.options.timeoutMs ?? 5000,
+          heartbeatIntervalMs: this.options.heartbeatIntervalMs,
+          heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
+          reconnect: this.options.reconnect,
+          reconnectInitialDelayMs: this.options.reconnectInitialDelayMs,
+          reconnectMaxDelayMs: this.options.reconnectMaxDelayMs,
+        },
+      });
+      this.pools.set(key, pool);
     }
-
-    const connection = new RpcConnection({
-      host,
-      port,
-      timeoutMs: this.options.timeoutMs ?? 5000,
-      heartbeatIntervalMs: this.options.heartbeatIntervalMs,
-      heartbeatTimeoutMs: this.options.heartbeatTimeoutMs,
-      reconnect: this.options.reconnect,
-      reconnectInitialDelayMs: this.options.reconnectInitialDelayMs,
-      reconnectMaxDelayMs: this.options.reconnectMaxDelayMs,
-    });
-
-    this.connections.set(key, connection);
-
-    return connection;
+    return pool.getConnection();
   }
 
   private getEndpointKey(host: string, port: number): string {

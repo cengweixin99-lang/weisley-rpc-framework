@@ -62,6 +62,8 @@ function getServerPort(server: RpcServer): number {
   return address.port;
 }
 
+
+
 describe("RpcClient", () => {
   it("tracks connection state across connect and close", async () => {
     const server = new RpcServer();
@@ -520,10 +522,12 @@ describe("RpcClient", () => {
 
     client.close();
   });
+  
   it("uses custom retry policy in discovery failover", async () => {
     const server1 = new RpcServer();
     const server2 = new RpcServer();
 
+    const retryContexts: unknown[] = [];
     server1.registerService("UserService", {
       async getUser(id: number) {
         return { id, name: "Alice" };
@@ -550,7 +554,8 @@ describe("RpcClient", () => {
       loadBalancer: new RoundRobinLoadBalancer(),
       timeoutMs: 1000,
       retryPolicy: {
-        shouldRetry() {
+        shouldRetry(_error, context) {
+          retryContexts.push(context);
           return true;
         },
       },
@@ -559,6 +564,140 @@ describe("RpcClient", () => {
     const result = await client.call("UserService", "missingMethod", []);
 
     expect(result).toBe("called by custom retry policy");
+    expect(retryContexts).toHaveLength(1);
+    expect(retryContexts).toEqual([
+    {
+      serviceName: "UserService",
+      attempt: 1,
+      maxAttempts: 2,
+      endpoint: {
+        host: "127.0.0.1",
+        port: getServerPort(server1),
+      },
+    },
+  ]);
+    client.close();
+    await server1.close();
+    await server2.close();
+  });
+
+  it("shares in-flight connection when calls start concurrently", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: `User-${id}` };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      maxConnectionsPerEndpoint: 1,
+    });
+
+    const [first, second] = await Promise.all([
+      client.call("UserService", "getUser", [1]),
+      client.call("UserService", "getUser", [2]),
+    ]);
+
+    expect(first).toEqual({ id: 1, name: "User-1" });
+    expect(second).toEqual({ id: 2, name: "User-2" });
+
+    client.close();
+    await server.close();
+  });
+
+  it ("limits tcp connections per endpoint with connection pool", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { id, name: `User-${id}`};
+      },
+    });
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      maxConnectionsPerEndpoint: 2,
+    });
+    const results = await Promise.all([
+      client.call("UserService", "getUser", [1]),
+      client.call("UserService", "getUser", [2]),
+      client.call("UserService", "getUser", [3]),
+      client.call("UserService", "getUser", [4]),
+    ]);
+
+    expect(results).toEqual([
+      { id: 1, name: "User-1" },
+      { id: 2, name: "User-2" },
+      { id: 3, name: "User-3" },
+      { id: 4, name: "User-4" },
+    ]);
+
+    expect(server.getConnectionCount()).toBeLessThanOrEqual(2);
+    client.close();
+    await server.close();
+  })
+
+  it("maintains separate connection pools for discovered endpoints", async () => {
+    const server1 = new RpcServer();
+    const server2 = new RpcServer();
+
+    server1.registerService("UserService", {
+      async getUser(id: number) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { id, name: `Alice-${id}` };
+      },
+    });
+
+    server2.registerService("UserService", {
+      async getUser(id: number) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { id, name: `Bob-${id}` };
+      },
+    });
+
+    await server1.listen({ host: "127.0.0.1", port: 0 });
+    await server2.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: getServerPort(server1) },
+          { host: "127.0.0.1", port: getServerPort(server2) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 1000,
+      maxConnectionsPerEndpoint: 1,
+    });
+
+    const results = await Promise.all([
+      client.call("UserService", "getUser", [1]),
+      client.call("UserService", "getUser", [2]),
+      client.call("UserService", "getUser", [3]),
+      client.call("UserService", "getUser", [4]),
+    ]);
+
+    expect(results).toEqual([
+      { id: 1, name: "Alice-1" },
+      { id: 2, name: "Bob-2" },
+      { id: 3, name: "Alice-3" },
+      { id: 4, name: "Bob-4" },
+    ]);
+
+    expect(server1.getConnectionCount()).toBeLessThanOrEqual(1);
+    expect(server2.getConnectionCount()).toBeLessThanOrEqual(1);
 
     client.close();
     await server1.close();

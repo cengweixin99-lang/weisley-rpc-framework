@@ -1,6 +1,14 @@
+import type { Endpoint } from "../discovery/types.js";
 import { RpcError } from "../errors.js";
+
 export interface RetryPolicy {
-    shouldRetry(error: unknown): boolean;
+    shouldRetry(error: unknown, context: RetryContext): boolean;
+}
+export type RetryContext = {
+    serviceName: string;
+    attempt: number;
+    maxAttempts: number;
+    endpoint: Endpoint;
 }
 
 export class DefaultRetryPolicy implements RetryPolicy {
@@ -15,11 +23,11 @@ export class DefaultRetryPolicy implements RetryPolicy {
     private readonly retryableNodeCodes = new Set([
         "ECONNREFUSED",
         "ECONNRESET",
-        "ETIMEOUT",
+        "ETIMEDOUT",
         "EPIPE",
     ]);
 
-    shouldRetry(error: unknown): boolean {
+    shouldRetry(error: unknown, _context: RetryContext): boolean {
         if (error instanceof RpcError) {
             return this.retryableRpcCodes.has(error.code);
         }

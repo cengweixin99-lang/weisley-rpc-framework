@@ -10,7 +10,7 @@ export type CommonRpcClientOptions = {
   reconnectInitialDelayMs?: number;
   reconnectMaxDelayMs?: number;
   retryPolicy?: RetryPolicy;
-
+  maxConnectionsPerEndpoint?: number;
 };
 
 export type DirectRpcClientOptions = CommonRpcClientOptions & {
@@ -24,7 +24,6 @@ export type DiscoveryRpcClientOptions
   mode: "discovery";
   registry: Registry;
   loadBalancer: LoadBalancer;
-
 };
 
 export type RpcClientOptions = DirectRpcClientOptions | DiscoveryRpcClientOptions;

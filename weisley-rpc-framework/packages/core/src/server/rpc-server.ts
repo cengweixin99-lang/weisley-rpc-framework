@@ -22,7 +22,9 @@ export class RpcServer {
       this.server?.listen(options.port, options.host ?? "127.0.0.1", resolve);
     });
   }
-
+  getConnectionCount(): number {
+    return this.sockets.size;
+  }
   address(): AddressInfo | null {
     const address = this.server?.address();
     if (!address || typeof address === "string") {

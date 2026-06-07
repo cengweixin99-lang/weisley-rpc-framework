@@ -17,6 +17,7 @@ type RpcConnectionOptions = {
 };
 
 export class RpcConnection {
+  private connectionPromise: Promise<void> | null = null;
   private readonly codec = new RpcCodec();
   private readonly pending = new Map<string, PendingRequest>();
   private socket: Socket | null = null;
@@ -73,29 +74,22 @@ export class RpcConnection {
   }
 
   async connect(): Promise<void> {
-    if (this.socket && !this.socket.destroyed) {
+    if (this.state === "connected" && this.socket && !this.socket.destroyed) {
       return;
     }
-    this.manuallyClosed = false;
-    this.state = "connecting";
-    this.socket = createConnection({ host: this.options.host, port: this.options.port, timeout: this.options.timeoutMs});
-    this.socket.on("data", (chunk) => this.handleData(chunk));
-    this.socket.on("close", () => {
-      this.handleUnexpectedDisconnect(
-        new RpcError("Connection closed", "CONNECTION_CLOSED"),
-      )
-    });
-    this.socket.on("error", (error) => {
-      this.handleUnexpectedDisconnect(error);
-    });
 
-    await new Promise<void>((resolve, reject) => {
-      this.socket?.once("connect", resolve);
-      this.socket?.once("error", reject);
-    });
-    this.state = "connected";
-    this.reconnectAttempts = 0;
-    this.startHeartbeat();
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+
+    this.connectionPromise = this.doConnect();
+
+    try {
+      await this.connectionPromise;
+    } finally {
+      this.connectionPromise = null;
+    }
+    
   }
 
   send(id: string, payload: Buffer): Promise<unknown> {
@@ -130,6 +124,29 @@ export class RpcConnection {
     this.socket?.end();
   }
 
+  private async doConnect(): Promise<void> {
+    this.manuallyClosed = false;
+    this.state = "connecting";
+    this.socket = createConnection({ host: this.options.host, port: this.options.port, timeout: this.options.timeoutMs});
+    this.socket.on("data", (chunk) => this.handleData(chunk));
+    this.socket.on("close", () => {
+      this.handleUnexpectedDisconnect(
+        new RpcError("Connection closed", "CONNECTION_CLOSED"),
+      )
+    });
+    this.socket.on("error", (error) => {
+      this.handleUnexpectedDisconnect(error);
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      this.socket?.once("connect", resolve);
+      this.socket?.once("error", reject);
+    });
+    this.state = "connected";
+    this.reconnectAttempts = 0;
+    this.startHeartbeat();
+  }
+  
   private startHeartbeat(): void {
     const intervalMs = this.options.heartbeatIntervalMs;
     if (!intervalMs) {
