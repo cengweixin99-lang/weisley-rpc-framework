@@ -47,4 +47,27 @@ describe("RpcConnectionPool", () => {
 
     pool.close();
   });
+  it ("returns connection stats", () => {
+    const pool = new RpcConnectionPool({
+      host: "127.0.0.1",
+      port: 4000,
+      maxConnections: 2,
+      connectionOptions: {
+        timeoutMs: 1000,
+      },
+    });
+    pool.getConnection();
+    pool.getConnection();
+    expect(pool.getStats()).toEqual({
+      total: 2,
+      states: {
+        idle: 2,
+        connecting: 0,
+        connected: 0,
+        reconnecting: 0,
+        closed: 0,
+      },
+    });
+    pool.close();
+  })
 });

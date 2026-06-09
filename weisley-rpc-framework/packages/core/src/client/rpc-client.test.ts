@@ -53,6 +53,25 @@ async function closeNodeServer(server: ReturnType<typeof createServer>): Promise
   });
 }
 
+async function getClosedPort(): Promise<number> {
+  const server = createServer();
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Temporary server address is not available");
+  }
+
+  const port = address.port;
+  await closeNodeServer(server);
+
+  return port;
+}
+
 function getServerPort(server: RpcServer): number {
   const address = server.address();
   if (!address) {
@@ -427,7 +446,7 @@ describe("RpcClient", () => {
 
     await server.listen({ host: "127.0.0.1", port: 0 });
 
-    const badPort = getServerPort(server) + 10000;
+    const badPort = await getClosedPort();
 
     const client = new RpcClient({
       mode: "discovery",
@@ -702,5 +721,156 @@ describe("RpcClient", () => {
     client.close();
     await server1.close();
     await server2.close();
+  });
+  it ("returns connection stats by endpoint", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const port = getServerPort(server);
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port,
+      timeoutMs: 1000,
+      maxConnectionsPerEndpoint: 2,
+    });
+    await Promise.all([
+      client.call("UserService", "getUser", [1]),
+      client.call("UserService", "getUser", [2]),
+    ]);
+    expect(client.getConnectionStats()).toEqual({
+      [`127.0.0.1:${port}`]: {
+        total: 2,
+        states: {
+          idle: 0,
+          connecting: 0,
+          connected: 2,
+          reconnecting: 0,
+          closed: 0,
+        },
+      },
+    });
+    client.close();
+    await server.close();
+  });
+  it("records metrics for successful calls", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+    await server.listen({ host: "127.0.0.1", port: 0 });
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+    });
+    await client.call("UserService", "getUser", [1]);
+    await client.call("UserService", "getUser", [2]);
+
+    const metrics = client.getMetrics();
+    expect(metrics["UserService.getUser"]?.totalCalls).toBe(2);
+    expect(metrics["UserService.getUser"]?.successCalls).toBe(2);
+    expect(metrics["UserService.getUser"]?.failedCalls).toBe(0);
+    expect(metrics["UserService.getUser"]?.averageDurationMs).toBeGreaterThanOrEqual(0);
+    client.close();
+    await server.close();
+  });
+
+  it("record metrics for failed calls", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+    });
+
+    await expect(client.call("UserService", "missingMethod", [])).rejects.toMatchObject({
+      code: "METHOD_NOT_FOUND",
+    });
+    const metrics = client.getMetrics();
+    expect(metrics["UserService.missingMethod"]).toMatchObject({
+      totalCalls: 1,
+      successCalls: 0,
+      failedCalls: 1,
+      lastErrorCode: "METHOD_NOT_FOUND",
+  });
+
+    client.close();
+    await server.close();
+  });
+
+  it("returns an isolated metrics snapshot", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+    });
+
+    await client.call("UserService", "getUser", [1]);
+    const metrics = client.getMetrics();
+    metrics["UserService.getUser"]!.totalCalls = 999;
+    expect(client.getMetrics()["UserService.getUser"]?.totalCalls).toBe(1);
+    // expect(metrics["UserService.getUser"]?.totalCalls).toBe(999);
+    client.close();
+    await server.close();
+  });
+  
+  it("resets metrics", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+    });
+
+    await client.call("UserService", "getUser", [1]);
+
+    expect(client.getMetrics()["UserService.getUser"]?.totalCalls).toBe(1);
+
+    client.resetMetrics();
+
+    expect(client.getMetrics()).toEqual({});
+
+    client.close();
+    await server.close();
   });
 });

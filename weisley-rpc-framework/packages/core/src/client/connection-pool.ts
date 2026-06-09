@@ -1,6 +1,5 @@
 import { RpcConnection } from "./connection.js";
-import type { ConnectionState } from "../types.js";
-
+import type { ConnectionState, EndpointConnectionStats } from "../types.js";
 type RpcConnectionPoolOptions = {
     host: string;
     port: number;
@@ -24,6 +23,22 @@ export class RpcConnectionPool {
         }
     }
 
+    getStats(): EndpointConnectionStats {
+        const states: EndpointConnectionStats["states"] = {
+            idle: 0,
+            connecting: 0,
+            connected: 0,
+            reconnecting: 0,
+            closed: 0,
+        };
+        for (const connection of this.connections) {
+            states[connection.getState()] += 1;
+        }
+        return {
+            total: this.connections.length,
+            states,
+        };
+    }
     getConnection(): RpcConnection {
         if (this.connections.length < this.options.maxConnections) {
             const connection = this.createConnection();
