@@ -1,6 +1,7 @@
 export type Endpoint = {
   host: string;
   port: number;
+  weight?: number;
 };
 
 export interface Registry {

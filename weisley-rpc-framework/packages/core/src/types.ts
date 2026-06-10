@@ -10,6 +10,10 @@ export type CommonRpcClientOptions = {
   reconnectMaxDelayMs?: number;
   retryPolicy?: RetryPolicy;
   maxConnectionsPerEndpoint?: number;
+  retryMaxAttempts?: number;
+  retryInitialBackoffMs?: number;
+  retryMaxBackoffMs?: number;
+  retryRules?: RetryRules;
 };
 
 export type DirectRpcClientOptions = CommonRpcClientOptions & {
@@ -50,4 +54,12 @@ export type RpcMethodMetrics = {
   lastErrorCode?: string | undefined;
 };
 export type RpcClientMetrics = Record<string, RpcMethodMetrics>;
+
+export type RetryRule = {
+  maxAttempts?: number;
+  initialBackoffMs?: number;
+  maxBackoffMs?: number;
+}
+
+export type RetryRules = Record<string, RetryRule>;
 

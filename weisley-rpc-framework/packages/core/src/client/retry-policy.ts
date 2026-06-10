@@ -6,9 +6,11 @@ export interface RetryPolicy {
 }
 export type RetryContext = {
     serviceName: string;
+    method: string;
     attempt: number;
     maxAttempts: number;
     endpoint: Endpoint;
+    errorCode?: string | undefined;
 }
 
 export class DefaultRetryPolicy implements RetryPolicy {

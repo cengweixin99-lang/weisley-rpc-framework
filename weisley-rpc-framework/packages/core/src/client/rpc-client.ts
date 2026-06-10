@@ -170,8 +170,8 @@ export class RpcClient {
 
     const endpoints = this.options.registry.lookup(serviceName);
     let lastError: unknown;
-
-    for (let attempt = 0; attempt < endpoints.length; attempt += 1) {
+    const maxAttempts = this.getMaxAttempts(serviceName, request.method, endpoints.length);
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const endpoint = this.options.loadBalancer.select(serviceName, endpoints);
       const connection = this.getConnection(endpoint.host, endpoint.port);
 
@@ -183,14 +183,19 @@ export class RpcClient {
         return await connection.send(request.id, this.codec.encode(request));
       } catch (error) {
         lastError = error;
-
-        if (!this.retryPolicy.shouldRetry(error, {
+        const retryContext = {
           serviceName,
+          method: request.method,
           attempt: attempt + 1,
-          maxAttempts: endpoints.length,
+          maxAttempts: maxAttempts,
           endpoint,
-        })) {
+          errorCode: this.getErrorCode(error),
+        };
+        if (!this.retryPolicy.shouldRetry(error, retryContext)) {
           throw error;
+        }
+        if (retryContext.attempt < retryContext.maxAttempts) {
+          await this.sleep(this.getRetryBackoffMs(serviceName, request.method, retryContext.attempt));
         }
       }
     }
@@ -202,6 +207,47 @@ export class RpcClient {
     throw new Error(`No available endpoint for service: ${serviceName}`);
   }
 
+  private getRetryBackoffMs(serviceName: string, method: string, attempt: number): number {
+    const rule = this.getRetryRule(serviceName, method);
+
+    const initialDelay = rule?.initialBackoffMs ?? this.options.retryInitialBackoffMs ?? 0;
+
+    if (initialDelay <= 0) {
+      return 0;
+    }
+
+    const maxDelay = rule?.maxBackoffMs ?? this.options.retryMaxBackoffMs ?? initialDelay;
+    return Math.min(
+      initialDelay * 2 ** (attempt - 1),
+      maxDelay,
+    );
+  }
+
+  private sleep(ms: number): Promise<void> {
+    if (ms <= 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private getMaxAttempts(serviceName:string, method: string, endpointCount: number): number {
+    const rule = this.getRetryRule(serviceName, method);
+    const configured = rule?.maxAttempts ?? this.options.retryMaxAttempts;
+
+    if (configured === undefined) {
+      return endpointCount;
+    }
+
+    if (!Number.isFinite(configured)) {
+      return endpointCount;
+    }
+
+    return Math.max(1, Math.min(Math.floor(configured), endpointCount));
+  }
+  
+  private getRetryRule(serviceName: string, method: string) {
+    return this.options.retryRules?.[this.getMethodKey(serviceName, method)];
+  }
   private getConnection(host: string, port: number): RpcConnection {
     const key = this.getEndpointKey(host, port);
     let pool = this.pools.get(key);

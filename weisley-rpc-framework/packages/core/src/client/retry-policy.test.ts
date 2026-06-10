@@ -1,15 +1,17 @@
 import { describe , expect, it } from "vitest";
-import { DefaultRetryPolicy, RetryContext } from "./retry-policy.js";
+import { DefaultRetryPolicy, type RetryContext } from "./retry-policy.js";
 import { MethodNotFoundError, RpcError, RpcTimeoutError } from "../errors.js";
 
 const context: RetryContext = {
     serviceName: "UserService",
+    method: "getUser",
     attempt: 1,
     maxAttempts: 2,
     endpoint: {
         host: "127.0.0.1",
         port: 4000,
     },
+    errorCode: "RPC_TIMEOUT",
 };
 
 describe("DefaultRetryPolicy", () => {

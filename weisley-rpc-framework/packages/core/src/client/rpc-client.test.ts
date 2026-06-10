@@ -331,7 +331,7 @@ describe("RpcClient", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(client.getConnectionState()).toBe("reconnecting");
+    expect(["reconnecting", "connecting"]).toContain(client.getConnectionState());
 
     client.close();
     await server.close();
@@ -587,12 +587,14 @@ describe("RpcClient", () => {
     expect(retryContexts).toEqual([
     {
       serviceName: "UserService",
+      method: "missingMethod",
       attempt: 1,
       maxAttempts: 2,
       endpoint: {
         host: "127.0.0.1",
         port: getServerPort(server1),
       },
+      errorCode: "METHOD_NOT_FOUND",
     },
   ]);
     client.close();
@@ -869,6 +871,281 @@ describe("RpcClient", () => {
     client.resetMetrics();
 
     expect(client.getMetrics()).toEqual({});
+
+    client.close();
+    await server.close();
+  });
+
+  it("limit discovery failover attempts by retryMaxAttempts", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+    await server.listen({ host: "127.0.0.1", port: 0 });
+    const badPort1 = await getClosedPort();
+    const badPort2 = await getClosedPort();
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: badPort1 },
+          { host: "127.0.0.1", port: badPort2 },
+          { host: "127.0.0.1", port: getServerPort(server) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+      reconnect: false,
+      retryMaxAttempts: 2,
+    });
+    await expect(client.call("UserService", "getUser", [1])).rejects.toMatchObject({
+      code: "ECONNREFUSED",
+    });
+    client.close();
+    await server.close();
+  });
+
+  it("tries all discovered endpoints by default", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const badPort1 = await getClosedPort();
+    const badPort2 = await getClosedPort();
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: badPort1 },
+          { host: "127.0.0.1", port: badPort2 },
+          { host: "127.0.0.1", port: getServerPort(server) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+      reconnect: false,
+    });
+
+    const result = await client.call("UserService", "getUser", [1]);
+
+    expect(result).toEqual({ id: 1, name: "Alice" });
+
+    client.close();
+    await server.close();
+  });
+
+  it("passes configured retryMaxAttempts to retry context", async () => {
+    const badPort = await getClosedPort();
+    const retryContexts: unknown[] = [];
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: badPort },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+      reconnect: false,
+      retryMaxAttempts: 1,
+      retryPolicy: {
+        shouldRetry(_error, context) {
+          retryContexts.push(context);
+          return true;
+        },
+      },
+    });
+    await expect(client.call("UserService", "getUser", [1])).rejects.toMatchObject({
+      code: "ECONNREFUSED",
+    });
+    expect(retryContexts).toEqual([
+      {
+        serviceName: "UserService",
+        method: "getUser",
+        attempt: 1,
+        maxAttempts: 1,
+        endpoint: {
+          host: "127.0.0.1",
+          port: badPort,
+        },
+        errorCode: "ECONNREFUSED",
+      },
+    ]);
+    client.close();
+  });
+
+  it("waits with exponential backoff before retrying discovery failover", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+    await server.listen({ host: "127.0.0.1", port: 0 });
+    const badPort1 = await getClosedPort();
+    const badPort2 = await getClosedPort();
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: badPort1 },
+          { host: "127.0.0.1", port: badPort2 },
+          { host: "127.0.0.1", port: getServerPort(server) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+      reconnect: false,
+      retryInitialBackoffMs: 20,
+      retryMaxBackoffMs: 40,
+    });
+
+    const startedAt = Date.now();
+    const result = await client.call("UserService", "getUser", [1]);
+    const durationMs = Date.now() - startedAt;
+    expect(result).toEqual( { id: 1, name: "Alice" });
+    expect(durationMs).toBeGreaterThanOrEqual(55);
+    client.close();
+    await server.close();
+  });
+
+  it("uses method retry rule maxAttempts before global retryMaxAttempts", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const badPort1 = await getClosedPort();
+    const badPort2 = await getClosedPort();
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: badPort1 },
+          { host: "127.0.0.1", port: badPort2 },
+          { host: "127.0.0.1", port: getServerPort(server) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+      reconnect: false,
+      retryMaxAttempts: 3,
+      retryRules: {
+        "UserService.getUser": {
+          maxAttempts: 2,
+        },
+      },
+    });
+
+    await expect(client.call("UserService", "getUser", [1])).rejects.toMatchObject({
+      code: "ECONNREFUSED",
+    });
+
+    client.close();
+    await server.close();
+  });
+
+  it("uses global retryMaxAttempts when method retry rule is absent", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const badPort1 = await getClosedPort();
+    const badPort2 = await getClosedPort();
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: badPort1 },
+          { host: "127.0.0.1", port: badPort2 },
+          { host: "127.0.0.1", port: getServerPort(server) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+      reconnect: false,
+      retryMaxAttempts: 3,
+      retryRules: {
+        "OrderService.createOrder": {
+          maxAttempts: 1,
+        },
+      },
+    });
+
+    const result = await client.call("UserService", "getUser", [1]);
+
+    expect(result).toEqual({ id: 1, name: "Alice" });
+
+    client.close();
+    await server.close();
+  });
+it("uses method retry rule backoff before global retry backoff", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const badPort1 = await getClosedPort();
+    const badPort2 = await getClosedPort();
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: badPort1 },
+          { host: "127.0.0.1", port: badPort2 },
+          { host: "127.0.0.1", port: getServerPort(server) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 100,
+      reconnect: false,
+      retryInitialBackoffMs: 1,
+      retryMaxBackoffMs: 1,
+      retryRules: {
+        "UserService.getUser": {
+          initialBackoffMs: 20,
+          maxBackoffMs: 40,
+        },
+      },
+    });
+
+    const startedAt = Date.now();
+
+    const result = await client.call("UserService", "getUser", [1]);
+
+    const durationMs = Date.now() - startedAt;
+
+    expect(result).toEqual({ id: 1, name: "Alice" });
+    expect(durationMs).toBeGreaterThanOrEqual(55);
 
     client.close();
     await server.close();

@@ -7,3 +7,6 @@ export * from "./server/service-registry.js";
 export * from "./discovery/types.js";
 export * from "./discovery/static-registry.js";
 export * from "./discovery/round-robin-load-balancer.js";
+export * from "./discovery/random-load-balancer.js";
+export * from "./discovery/weighted-round-robin-load-balancer.js";
+export * from "./discovery/least-active-load-balancer.js";
