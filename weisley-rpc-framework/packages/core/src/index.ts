@@ -10,3 +10,6 @@ export * from "./discovery/round-robin-load-balancer.js";
 export * from "./discovery/random-load-balancer.js";
 export * from "./discovery/weighted-round-robin-load-balancer.js";
 export * from "./discovery/least-active-load-balancer.js";
+export * from "./client/circuit-breaker.js";
+export * from "./client/rate-limiter.js";
+export * from "./logger.js";

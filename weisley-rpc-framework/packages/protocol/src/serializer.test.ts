@@ -11,8 +11,9 @@ describe("JsonSerializer", () => {
             service: "UserService",
             method: "getUser",
             params: [1],
-            meta: {
+            metadata: {
                 traceId: "trace-1",
+                source: "test",
             },
         };
 

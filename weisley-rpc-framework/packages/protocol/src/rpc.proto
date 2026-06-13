@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package weisley.rpc;
+
+message RpcError {
+    string code = 1;
+    string message = 2;
+    string stack = 3;
+}
+
+message RpcMessage {
+    string type = 1;
+    string id = 2;
+
+    string service = 3;
+    string method = 4;
+
+    repeated string paramsJson = 5;
+
+    bool ok = 6;
+    string resultJson = 7;
+    RpcError error = 8;
+
+    int64 timestamp = 9;
+
+    map<string, string> metadata = 10;
+    string serializer = 11;
+}

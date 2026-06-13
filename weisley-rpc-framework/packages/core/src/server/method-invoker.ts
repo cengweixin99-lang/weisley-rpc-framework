@@ -15,14 +15,16 @@ export class MethodInvoker {
         id: request.id,
         ok: true,
         result,
-      };
+        metadata: request.metadata,
+      } as RpcResponse;
     } catch (error) {
       return {
         type: "response",
         id: request.id,
         ok: false,
         error: this.toRpcError(error),
-      };
+        metadata: request.metadata,
+      } as RpcResponse;
     }
   }
 

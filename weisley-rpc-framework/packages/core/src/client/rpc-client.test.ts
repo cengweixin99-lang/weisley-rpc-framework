@@ -4,7 +4,34 @@ import { RoundRobinLoadBalancer } from "../discovery/round-robin-load-balancer.j
 import { StaticRegistry } from "../discovery/static-registry.js";
 import { RpcServer } from "../server/rpc-server.js";
 import { RpcClient } from "./rpc-client.js";
+import { warn } from "node:console";
+import { GzipCompressor, ProtobufSerializer } from "@weisley-rpc/protocol";
 
+function createTestLogger() {
+  return {
+    infos: [] as Array<{
+      message: string;
+      fields?: Record<string, unknown> | undefined;
+    }>,
+    warns: [] as Array<{
+      message: string;
+      fields?: Record<string, unknown> | undefined;
+    }>,
+    errors: [] as Array<{
+      message: string;
+      fields?: Record<string, unknown> | undefined;
+    }>,
+    info(message: string, fields?: Record<string, unknown>) {
+      this.infos.push({ message, fields });
+    },
+    warn(message: string, fields?: Record<string, unknown>) {
+      this.warns.push({ message, fields });
+    },
+    error(message: string, fields?: Record<string, unknown>) {
+      this.errors.push({ message, fields });
+    },
+  };
+}
 async function listenSilentServer(): Promise<{
   server: ReturnType<typeof createServer>;
   sockets: Set<Socket>;
@@ -41,7 +68,9 @@ async function listenSilentServer(): Promise<{
   };
 }
 
-async function closeNodeServer(server: ReturnType<typeof createServer>): Promise<void> {
+async function closeNodeServer(
+  server: ReturnType<typeof createServer>,
+): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => {
       if (error) {
@@ -80,8 +109,6 @@ function getServerPort(server: RpcServer): number {
 
   return address.port;
 }
-
-
 
 describe("RpcClient", () => {
   it("tracks connection state across connect and close", async () => {
@@ -156,7 +183,9 @@ describe("RpcClient", () => {
 
     await client.connect();
 
-    await expect(client.call("UserService", "missingMethod", [])).rejects.toMatchObject({
+    await expect(
+      client.call("UserService", "missingMethod", []),
+    ).rejects.toMatchObject({
       code: "METHOD_NOT_FOUND",
     });
 
@@ -331,7 +360,9 @@ describe("RpcClient", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(["reconnecting", "connecting"]).toContain(client.getConnectionState());
+    expect(["reconnecting", "connecting"]).toContain(
+      client.getConnectionState(),
+    );
 
     client.close();
     await server.close();
@@ -469,7 +500,75 @@ describe("RpcClient", () => {
     await server.close();
   });
 
-  it ("does not fail over for non-retryable rpc errors", async () => {
+  it("fails over when selected endpoint is draining", async () => {
+    const server1 = new RpcServer();
+    const server2 = new RpcServer();
+    let releaseDrainingRequest!: () => void;
+    const drainingRequestStarted = new Promise<void>((resolve) => {
+      server1.registerService("UserService", {
+        async hold() {
+          resolve();
+          await new Promise<void>((release) => {
+            releaseDrainingRequest = release;
+          });
+          return "released";
+        },
+        async getUser() {
+          return { id: 1, name: "Alice" };
+        },
+      });
+    });
+
+    server2.registerService("UserService", {
+      async getUser() {
+        return { id: 1, name: "Bob" };
+      },
+    });
+
+    await server1.listen({ host: "127.0.0.1", port: 0 });
+    await server2.listen({ host: "127.0.0.1", port: 0 });
+    const server1Port = getServerPort(server1);
+    const server2Port = getServerPort(server2);
+
+    const holdClient = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: server1Port,
+      timeoutMs: 1000,
+    });
+    const holdCall = holdClient.call("UserService", "hold", []);
+    await drainingRequestStarted;
+
+    const closePromise = server1.close({ graceful: true, timeoutMs: 1000 });
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: server1Port },
+          { host: "127.0.0.1", port: server2Port },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 1000,
+      retryMaxAttempts: 2,
+    });
+
+    await expect(client.call("UserService", "getUser", [])).resolves.toEqual({
+      id: 1,
+      name: "Bob",
+    });
+
+    releaseDrainingRequest();
+    await expect(holdCall).resolves.toBe("released");
+    await closePromise;
+
+    client.close();
+    holdClient.close();
+    await server2.close();
+  });
+
+  it("does not fail over for non-retryable rpc errors", async () => {
     const server1 = new RpcServer();
     const server2 = new RpcServer();
     server1.registerService("UserService", {
@@ -499,7 +598,9 @@ describe("RpcClient", () => {
       timeoutMs: 1000,
     });
 
-    await expect(client.call("UserService", "missingMethod", [])).rejects.toMatchObject({
+    await expect(
+      client.call("UserService", "missingMethod", []),
+    ).rejects.toMatchObject({
       code: "METHOD_NOT_FOUND",
     });
     client.close();
@@ -507,7 +608,7 @@ describe("RpcClient", () => {
     await server2.close();
   });
 
-  it ("throw last error when all discovered endpoints are unavailable", async () => {
+  it("throw last error when all discovered endpoints are unavailable", async () => {
     const client = new RpcClient({
       mode: "discovery",
       registry: new StaticRegistry({
@@ -521,13 +622,15 @@ describe("RpcClient", () => {
       reconnect: false,
     });
 
-    await expect(client.call("UserService", "getUser", [1])).rejects.toMatchObject({
+    await expect(
+      client.call("UserService", "getUser", [1]),
+    ).rejects.toMatchObject({
       code: "ECONNREFUSED",
     });
     client.close();
   });
 
-  it ("rejects when no endpoint is discovered", async () => {
+  it("rejects when no endpoint is discovered", async () => {
     const client = new RpcClient({
       mode: "discovery",
       registry: new StaticRegistry({}),
@@ -541,7 +644,7 @@ describe("RpcClient", () => {
 
     client.close();
   });
-  
+
   it("uses custom retry policy in discovery failover", async () => {
     const server1 = new RpcServer();
     const server2 = new RpcServer();
@@ -585,18 +688,18 @@ describe("RpcClient", () => {
     expect(result).toBe("called by custom retry policy");
     expect(retryContexts).toHaveLength(1);
     expect(retryContexts).toEqual([
-    {
-      serviceName: "UserService",
-      method: "missingMethod",
-      attempt: 1,
-      maxAttempts: 2,
-      endpoint: {
-        host: "127.0.0.1",
-        port: getServerPort(server1),
+      {
+        serviceName: "UserService",
+        method: "missingMethod",
+        attempt: 1,
+        maxAttempts: 2,
+        endpoint: {
+          host: "127.0.0.1",
+          port: getServerPort(server1),
+        },
+        errorCode: "METHOD_NOT_FOUND",
       },
-      errorCode: "METHOD_NOT_FOUND",
-    },
-  ]);
+    ]);
     client.close();
     await server1.close();
     await server2.close();
@@ -633,12 +736,12 @@ describe("RpcClient", () => {
     await server.close();
   });
 
-  it ("limits tcp connections per endpoint with connection pool", async () => {
+  it("limits tcp connections per endpoint with connection pool", async () => {
     const server = new RpcServer();
     server.registerService("UserService", {
       async getUser(id: number) {
         await new Promise((resolve) => setTimeout(resolve, 20));
-        return { id, name: `User-${id}`};
+        return { id, name: `User-${id}` };
       },
     });
     await server.listen({ host: "127.0.0.1", port: 0 });
@@ -667,7 +770,7 @@ describe("RpcClient", () => {
     expect(server.getConnectionCount()).toBeLessThanOrEqual(2);
     client.close();
     await server.close();
-  })
+  });
 
   it("maintains separate connection pools for discovered endpoints", async () => {
     const server1 = new RpcServer();
@@ -724,7 +827,8 @@ describe("RpcClient", () => {
     await server1.close();
     await server2.close();
   });
-  it ("returns connection stats by endpoint", async () => {
+
+  it("returns connection stats by endpoint", async () => {
     const server = new RpcServer();
     server.registerService("UserService", {
       async getUser(id: number) {
@@ -760,6 +864,7 @@ describe("RpcClient", () => {
     client.close();
     await server.close();
   });
+
   it("records metrics for successful calls", async () => {
     const server = new RpcServer();
     server.registerService("UserService", {
@@ -781,7 +886,9 @@ describe("RpcClient", () => {
     expect(metrics["UserService.getUser"]?.totalCalls).toBe(2);
     expect(metrics["UserService.getUser"]?.successCalls).toBe(2);
     expect(metrics["UserService.getUser"]?.failedCalls).toBe(0);
-    expect(metrics["UserService.getUser"]?.averageDurationMs).toBeGreaterThanOrEqual(0);
+    expect(
+      metrics["UserService.getUser"]?.averageDurationMs,
+    ).toBeGreaterThanOrEqual(0);
     client.close();
     await server.close();
   });
@@ -804,7 +911,9 @@ describe("RpcClient", () => {
       timeoutMs: 1000,
     });
 
-    await expect(client.call("UserService", "missingMethod", [])).rejects.toMatchObject({
+    await expect(
+      client.call("UserService", "missingMethod", []),
+    ).rejects.toMatchObject({
       code: "METHOD_NOT_FOUND",
     });
     const metrics = client.getMetrics();
@@ -813,7 +922,7 @@ describe("RpcClient", () => {
       successCalls: 0,
       failedCalls: 1,
       lastErrorCode: "METHOD_NOT_FOUND",
-  });
+    });
 
     client.close();
     await server.close();
@@ -845,7 +954,7 @@ describe("RpcClient", () => {
     client.close();
     await server.close();
   });
-  
+
   it("resets metrics", async () => {
     const server = new RpcServer();
 
@@ -900,7 +1009,9 @@ describe("RpcClient", () => {
       reconnect: false,
       retryMaxAttempts: 2,
     });
-    await expect(client.call("UserService", "getUser", [1])).rejects.toMatchObject({
+    await expect(
+      client.call("UserService", "getUser", [1]),
+    ).rejects.toMatchObject({
       code: "ECONNREFUSED",
     });
     client.close();
@@ -949,9 +1060,7 @@ describe("RpcClient", () => {
     const client = new RpcClient({
       mode: "discovery",
       registry: new StaticRegistry({
-        UserService: [
-          { host: "127.0.0.1", port: badPort },
-        ],
+        UserService: [{ host: "127.0.0.1", port: badPort }],
       }),
       loadBalancer: new RoundRobinLoadBalancer(),
       timeoutMs: 100,
@@ -964,7 +1073,9 @@ describe("RpcClient", () => {
         },
       },
     });
-    await expect(client.call("UserService", "getUser", [1])).rejects.toMatchObject({
+    await expect(
+      client.call("UserService", "getUser", [1]),
+    ).rejects.toMatchObject({
       code: "ECONNREFUSED",
     });
     expect(retryContexts).toEqual([
@@ -1013,7 +1124,7 @@ describe("RpcClient", () => {
     const startedAt = Date.now();
     const result = await client.call("UserService", "getUser", [1]);
     const durationMs = Date.now() - startedAt;
-    expect(result).toEqual( { id: 1, name: "Alice" });
+    expect(result).toEqual({ id: 1, name: "Alice" });
     expect(durationMs).toBeGreaterThanOrEqual(55);
     client.close();
     await server.close();
@@ -1053,7 +1164,9 @@ describe("RpcClient", () => {
       },
     });
 
-    await expect(client.call("UserService", "getUser", [1])).rejects.toMatchObject({
+    await expect(
+      client.call("UserService", "getUser", [1]),
+    ).rejects.toMatchObject({
       code: "ECONNREFUSED",
     });
 
@@ -1102,7 +1215,8 @@ describe("RpcClient", () => {
     client.close();
     await server.close();
   });
-it("uses method retry rule backoff before global retry backoff", async () => {
+
+  it("uses method retry rule backoff before global retry backoff", async () => {
     const server = new RpcServer();
 
     server.registerService("UserService", {
@@ -1150,4 +1264,616 @@ it("uses method retry rule backoff before global retry backoff", async () => {
     client.close();
     await server.close();
   });
+
+  it("open circuit breaker after failures", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async fail() {
+        throw new Error("boom");
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      circuitBreakerOptions: {
+        failureThreshold: 1,
+        resetTimeoutMs: 1000,
+      },
+    });
+
+    await expect(client.call("UserService", "fail", [])).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+    });
+
+    client.close();
+    await server.close();
+  });
+
+  it("does not send rpc request when circuit is open", async () => {
+    const server = new RpcServer();
+    let callCount = 0;
+    server.registerService("UserService", {
+      async fail() {
+        callCount += 1;
+        throw new Error("boom");
+      },
+    });
+    await server.listen({ host: "127.0.0.1", port: 0 });
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      circuitBreakerOptions: {
+        failureThreshold: 1,
+        resetTimeoutMs: 1000,
+      },
+    });
+    await expect(client.call("UserService", "fail", [])).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+    });
+    expect(callCount).toBe(1);
+
+    client.close();
+    await server.close();
+  });
+
+  it("recovers after circuit breaker half-open probe succeeds", async () => {
+    const server = new RpcServer();
+    let shouldFail = true;
+    let callCount = 0;
+
+    server.registerService("UserService", {
+      async unstableMethod() {
+        callCount += 1;
+
+        if (shouldFail) {
+          throw new Error("simulated server failure");
+        }
+
+        return "ok";
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      circuitBreakerOptions: {
+        failureThreshold: 1,
+        resetTimeoutMs: 10,
+      },
+    });
+
+    // First call reaches the server and fails.
+    await expect(
+      client.call("UserService", "unstableMethod", []),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+    });
+
+    expect(callCount).toBe(1);
+
+    // Circuit is open now, so this request should be rejected locally.
+    await expect(
+      client.call("UserService", "unstableMethod", []),
+    ).rejects.toMatchObject({
+      code: "CIRCUIT_BREAKER_OPEN",
+    });
+
+    expect(callCount).toBe(1);
+
+    shouldFail = false;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    // Half-open probe succeeds and closes the circuit.
+    await expect(
+      client.call("UserService", "unstableMethod", []),
+    ).resolves.toBe("ok");
+
+    expect(callCount).toBe(2);
+
+    // Circuit is closed again, so normal calls continue.
+    await expect(
+      client.call("UserService", "unstableMethod", []),
+    ).resolves.toBe("ok");
+
+    expect(callCount).toBe(3);
+
+    client.close();
+    await server.close();
+  });
+
+  it("allows rpc calls while rate limiter has tokens", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      rateLimiterOptions: {
+        capacity: 1,
+        refillTokens: 1,
+        refillIntervalMs: 1000,
+      },
+    });
+    const result = await client.call("UserService", "getUser", [1]);
+    expect(result).toEqual({ id: 1, name: "Alice" });
+    client.close();
+    await server.close();
+  });
+
+  it("rejects locally when rate limit is exceeded", async () => {
+    const server = new RpcServer();
+    let callCount = 0;
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        callCount += 1;
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      rateLimiterOptions: {
+        capacity: 1,
+        refillTokens: 1,
+        refillIntervalMs: 1000,
+      },
+    });
+
+    const result = await client.call("UserService", "getUser", [1]);
+
+    expect(result).toEqual({ id: 1, name: "Alice" });
+
+    await expect(
+      client.call("UserService", "getUser", [2]),
+    ).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+
+    expect(callCount).toBe(1);
+
+    client.close();
+    await server.close();
+  });
+
+  it("allows calls again after rate limiter refills tokens", async () => {
+    const server = new RpcServer();
+    let callCount = 0;
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        callCount += 1;
+        return { id, name: `User-${id}` };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      rateLimiterOptions: {
+        capacity: 1,
+        refillTokens: 1,
+        refillIntervalMs: 10,
+      },
+    });
+
+    await expect(client.call("UserService", "getUser", [1])).resolves.toEqual({
+      id: 1,
+      name: "User-1",
+    });
+
+    await expect(
+      client.call("UserService", "getUser", [2]),
+    ).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    await expect(client.call("UserService", "getUser", [3])).resolves.toEqual({
+      id: 3,
+      name: "User-3",
+    });
+
+    expect(callCount).toBe(2);
+
+    client.close();
+    await server.close();
+  });
+
+  it("logs client successful rpc call", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+    const logger = createTestLogger();
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      logger,
+    });
+
+    const result = await client.call("UserService", "getUser", [1], {
+      metadata: {
+        traceId: "trace-client-success",
+      },
+    });
+
+    expect(result).toEqual({ id: 1, name: "Alice" });
+    expect(logger.infos).toHaveLength(1);
+    expect(logger.infos[0]).toMatchObject({
+      message: "rpc client call succeeded",
+      fields: {
+        service: "UserService",
+        method: "getUser",
+        traceId: "trace-client-success",
+      },
+    });
+    expect(logger.infos[0]?.fields?.requestId).toEqual(expect.any(String));
+    expect(logger.infos[0]?.fields?.durationMs).toEqual(expect.any(Number));
+    client.close();
+    await server.close();
+  });
+
+  it("logs client failed rpc call", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const logger = createTestLogger();
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      logger,
+    });
+
+    await expect(
+      client.call("UserService", "missingMethod", [], {
+        metadata: {
+          traceId: "trace-client-failed",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "METHOD_NOT_FOUND",
+    });
+
+    expect(logger.errors).toHaveLength(1);
+    expect(logger.errors[0]).toMatchObject({
+      message: "rpc client call failed",
+      fields: {
+        service: "UserService",
+        method: "missingMethod",
+        traceId: "trace-client-failed",
+        errorCode: "METHOD_NOT_FOUND",
+      },
+    });
+    expect(logger.errors[0]?.fields?.requestId).toEqual(expect.any(String));
+    expect(logger.errors[0]?.fields?.durationMs).toEqual(expect.any(Number));
+
+    client.close();
+    await server.close();
+  });
+
+  it("logs warning when client call is rate limited", async () => {
+    const logger = createTestLogger();
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: 4000,
+      timeoutMs: 1000,
+      rateLimiterOptions: {
+        capacity: 1,
+        refillTokens: 1,
+        refillIntervalMs: 1000,
+      },
+      logger,
+    });
+
+    await expect(
+      client.call("UserService", "getUser", [1], {
+        metadata: {
+          traceId: "trace-rate-limited",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "ECONNREFUSED",
+    });
+
+    await expect(
+      client.call("UserService", "getUser", [1], {
+        metadata: {
+          traceId: "trace-rate-limited",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+
+    expect(logger.warns).toHaveLength(1);
+    expect(logger.warns[0]).toMatchObject({
+      message: "rpc client call rate limited",
+      fields: {
+        service: "UserService",
+        method: "getUser",
+        traceId: "trace-rate-limited",
+        requestId: expect.any(String),
+      },
+    });
+
+    client.close();
+  });
+  it("logs warning when circuit breaker is open", async () => {
+    const logger = createTestLogger();
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async fail() {
+        throw new Error("boom");
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      circuitBreakerOptions: {
+        failureThreshold: 1,
+        resetTimeoutMs: 1000,
+      },
+      logger,
+    });
+
+    await expect(
+      client.call("UserService", "fail", [], {
+        metadata: {
+          traceId: "trace-circuit-failed",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "INTERNAL_ERROR",
+    });
+
+    await expect(
+      client.call("UserService", "fail", [], {
+        metadata: {
+          traceId: "trace-circuit-open",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "CIRCUIT_BREAKER_OPEN",
+    });
+
+    expect(logger.warns).toHaveLength(1);
+    expect(logger.warns[0]).toMatchObject({
+      message: "rpc client circuit breaker open",
+      fields: {
+        service: "UserService",
+        method: "fail",
+        traceId: "trace-circuit-open",
+        requestId: expect.any(String),
+      },
+    });
+
+    client.close();
+    await server.close();
+  });
+
+  it("logs warning when discovery call retries failed endpoint", async () => {
+    const logger = createTestLogger();
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({ host: "127.0.0.1", port: 0 });
+
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          { host: "127.0.0.1", port: 65500 },
+          { host: "127.0.0.1", port: getServerPort(server) },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 1000,
+      retryMaxAttempts: 2,
+      logger,
+    });
+
+    await expect(
+      client.call("UserService", "getUser", [1], {
+        metadata: {
+          traceId: "trace-retry",
+        },
+      }),
+    ).resolves.toEqual({ id: 1, name: "Alice" });
+
+    expect(logger.warns).toHaveLength(1);
+    expect(logger.warns[0]).toMatchObject({
+      message: "rpc client retry attempt failed",
+      fields: {
+        service: "UserService",
+        method: "getUser",
+        traceId: "trace-retry",
+        requestId: expect.any(String),
+        attempt: 1,
+        maxAttempts: 2,
+        endpoint: {
+          host: "127.0.0.1",
+          port: 65500,
+        },
+        errorCode: "ECONNREFUSED",
+        backoffMs: expect.any(Number),
+      },
+    });
+
+    expect(logger.infos).toHaveLength(1);
+    expect(logger.infos[0]).toMatchObject({
+      message: "rpc client call succeeded",
+      fields: {
+        service: "UserService",
+        method: "getUser",
+        traceId: "trace-retry",
+      },
+    });
+
+    client.close();
+    await server.close();
+  });
+
+  it("calls remote service with protobuf serializer", async () => {
+    const server = new RpcServer();
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+    
+    await server.listen({
+      host: "127.0.0.1",
+      port: 0,
+      serializer: new ProtobufSerializer(),
+    });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      serializer: new ProtobufSerializer(),
+    });
+
+    await expect(client.call("UserService", "getUser", [1])).resolves.toEqual({
+      id: 1,
+      name: "Alice",
+    });
+
+    client.close();
+    await server.close();
+  });
+
+  it("calls remote service with gzip compression", async () => {
+    const compression = {
+      compressor: new GzipCompressor(),
+      thresholdBytes: 1,
+    };
+    const server = new RpcServer();
+    const content = "x".repeat(4096);
+
+    server.registerService("FileService", {
+      async download() {
+        return { content };
+      },
+    });
+
+    await server.listen({
+      host: "127.0.0.1",
+      port: 0,
+      compression,
+    });
+
+    const client = new RpcClient({
+      mode: "direct",
+      host: "127.0.0.1",
+      port: getServerPort(server),
+      timeoutMs: 1000,
+      compression,
+    });
+
+    await expect(client.call("FileService", "download", [])).resolves.toEqual({
+      content,
+    });
+
+    client.close();
+    await server.close();
+  });
+  
+  it("calls discovered remote service with protobuf serializer", async () => {
+    const server = new RpcServer();
+
+    server.registerService("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    await server.listen({
+      host: "127.0.0.1",
+      port: 0,
+      serializer: new ProtobufSerializer(),
+    });
+    
+    const client = new RpcClient({
+      mode: "discovery",
+      registry: new StaticRegistry({
+        UserService: [
+          {
+            host: "127.0.0.1",
+            port: getServerPort(server),
+          },
+        ],
+      }),
+      loadBalancer: new RoundRobinLoadBalancer(),
+      timeoutMs: 1000,
+      serializer: new ProtobufSerializer(),
+    });
+    await expect(client.call("UserService", "getUser", [1])).resolves.toEqual({
+      id: 1,
+      name: "Alice",
+    });
+    client.close();
+    await server.close();
+  });
+  
 });

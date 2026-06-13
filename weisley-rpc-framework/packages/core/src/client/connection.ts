@@ -1,14 +1,24 @@
 import { Socket, createConnection } from "node:net";
-import { RpcCodec, type RpcResponse } from "@weisley-rpc/protocol";
+import {
+  JsonSerializer,
+  RpcCodec,
+  type RpcCodecCompressionOptions,
+  type RpcCodecOptions,
+  type Serializer,
+} from "@weisley-rpc/protocol";
 import { RpcError, RpcTimeoutError } from "../errors.js";
 import type { PendingRequest } from "./pending-request.js";
 import { randomUUID } from "node:crypto";
 import type { ConnectionState } from "../types.js";
 
-type RpcConnectionOptions = {
+export type RpcConnectionOptions = {
   host: string;
   port: number;
   timeoutMs: number;
+  serializer?: Serializer;
+  compression?: RpcCodecCompressionOptions;
+  maxBodyLength?: number;
+  maxDecompressedBodyLength?: number;
   heartbeatIntervalMs?: number | undefined;
   heartbeatTimeoutMs?: number | undefined;
   reconnect?: boolean | undefined;
@@ -18,7 +28,7 @@ type RpcConnectionOptions = {
 
 export class RpcConnection {
   private connectionPromise: Promise<void> | null = null;
-  private readonly codec = new RpcCodec();
+  private readonly codec: RpcCodec;
   private readonly pending = new Map<string, PendingRequest>();
   private socket: Socket | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -27,7 +37,27 @@ export class RpcConnection {
   private manuallyClosed = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
-  constructor(private readonly options: RpcConnectionOptions) {}
+  private readonly serializer: Serializer;
+  constructor(private readonly options: RpcConnectionOptions) {
+    this.serializer = options.serializer ?? new JsonSerializer();
+    const codecOptions: RpcCodecOptions = {
+      serializer: this.serializer,
+    };
+
+    if (options.compression) {
+      codecOptions.compression = options.compression;
+    }
+
+    if (options.maxBodyLength !== undefined) {
+      codecOptions.maxBodyLength = options.maxBodyLength;
+    }
+
+    if (options.maxDecompressedBodyLength !== undefined) {
+      codecOptions.maxDecompressedBodyLength = options.maxDecompressedBodyLength;
+    }
+
+    this.codec = new RpcCodec(codecOptions);
+  }
 
 
   private scheduleReconnect(): void {
@@ -216,4 +246,5 @@ export class RpcConnection {
       this.pending.delete(id);
     }
   }
+
 }

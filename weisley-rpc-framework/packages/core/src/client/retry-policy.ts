@@ -20,6 +20,7 @@ export class DefaultRetryPolicy implements RetryPolicy {
         "CONNECTION_NOT_CONNECTED",
         "RPC_TIMEOUT",
         "HEARTBEAT_TIMEOUT",
+        "SERVER_DRAINING",
     ]);
 
     private readonly retryableNodeCodes = new Set([

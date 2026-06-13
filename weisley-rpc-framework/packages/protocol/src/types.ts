@@ -4,7 +4,7 @@ export type RpcRequest = {
   service: string;
   method: string;
   params: unknown[];
-  meta?: Record<string, string>;
+  metadata?: RpcMetadata;
 };
 
 export type RpcResponse = {
@@ -17,6 +17,7 @@ export type RpcResponse = {
     message: string;
     stack?: string;
   };
+  metadata?: RpcMetadata;
 };
 
 export type RpcPing = {
@@ -34,6 +35,11 @@ export type RpcPong = {
 export type RpcMessage = RpcRequest | RpcResponse | RpcPing | RpcPong;
 
 export interface Serializer {
+  readonly name: SerializerName;
   serialize(message: RpcMessage): Buffer;
   deserialize(buffer: Buffer): RpcMessage;
 }
+
+export type RpcMetadata = Record<string, string>;
+
+export type SerializerName = "json" | "protobuf";

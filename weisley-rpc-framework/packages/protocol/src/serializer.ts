@@ -4,6 +4,7 @@ import type { RpcMessage, Serializer } from "./types.js";
  * 解决 RpcMessage <-> body Buffer
  */
 export class JsonSerializer implements Serializer {
+  readonly name = "json" as const;
   // 序列化，RpcMessage -> Buffer
   serialize(message: RpcMessage): Buffer {
     //  Convert an RPC message object into a UTF-8 JSON Buffer.

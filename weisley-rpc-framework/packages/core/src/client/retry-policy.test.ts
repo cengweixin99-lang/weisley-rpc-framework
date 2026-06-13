@@ -19,6 +19,7 @@ describe("DefaultRetryPolicy", () => {
         const policy = new DefaultRetryPolicy();
         expect(policy.shouldRetry(new RpcTimeoutError(100), context)).toBe(true);
         expect(policy.shouldRetry(new RpcError("Connection closed", "CONNECTION_CLOSED"), context)).toBe(true);
+        expect(policy.shouldRetry(new RpcError("Server draining", "SERVER_DRAINING"), context)).toBe(true);
     });
 
     it ("does not retry non-retryable rpc errors", () => {

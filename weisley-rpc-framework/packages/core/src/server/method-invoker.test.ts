@@ -99,4 +99,62 @@ describe("MethodInvoker", () => {
     expect(response.error?.code).toBe("INTERNAL_ERROR");
     expect(response.error?.message).toBe("database failed");
   });
+  it("passes request metadata to successful response", async () => {
+    const registry = new ServiceRegistry();
+    registry.register("UserService", {
+      async getUser(id: number) {
+        return { id, name: "Alice" };
+      },
+    });
+
+    const invoker = new MethodInvoker(registry);
+
+    const response = await invoker.invoke({
+      type: "request",
+      id: "req-1",
+      service: "UserService",
+      method: "getUser",
+      params: [1],
+      metadata: {
+        traceId: "trace-1",
+      },
+    });
+    expect(response).toMatchObject({
+      type: "response",
+      id: "req-1",
+      ok: true,
+      result: {
+        id: 1,
+        name: "Alice",
+      },
+      metadata: {
+        traceId: "trace-1",
+      },
+    });
+  });
+
+  it("passes request metadata to error response", async () => {
+    const registry = new ServiceRegistry();
+    const invoker = new MethodInvoker(registry);
+
+    const response = await invoker.invoke({
+      type: "request",
+      id: "req-1",
+      service: "MissingService",
+      method: "getUser",
+      params: [1],
+      metadata: {
+        traceId: "trace-1",
+      },
+    });
+
+    expect(response).toMatchObject({
+      type: "response",
+      id: "req-1",
+      ok: false,
+      metadata: {
+        traceId: "trace-1",
+      },
+    });
+  });
 });

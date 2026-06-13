@@ -1,17 +1,11 @@
-import { RpcConnection } from "./connection.js";
+import { RpcConnection, type RpcConnectionOptions } from "./connection.js";
+import type { Serializer } from "@weisley-rpc/protocol";
 import type { ConnectionState, EndpointConnectionStats } from "../types.js";
 type RpcConnectionPoolOptions = {
     host: string;
     port: number;
     maxConnections: number;
-    connectionOptions: {
-        timeoutMs: number;
-        heartbeatIntervalMs?: number | undefined;
-        heartbeatTimeoutMs?: number | undefined;
-        reconnect?: boolean | undefined;
-        reconnectInitialDelayMs?: number | undefined;
-        reconnectMaxDelayMs?: number | undefined;
-    };
+    connectionOptions: Omit<RpcConnectionOptions, "host" | "port">;
 };
 
 export class RpcConnectionPool {

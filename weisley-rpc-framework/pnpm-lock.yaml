@@ -37,7 +37,11 @@ importers:
         specifier: ^4.19.2
         version: 4.22.3
 
-  packages/protocol: {}
+  packages/protocol:
+    dependencies:
+      protobufjs:
+        specifier: ^8.6.3
+        version: 8.6.3
 
 packages:
 
@@ -555,6 +559,9 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  long@5.3.2:
+    resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
+
   loupe@3.2.1:
     resolution: {integrity: sha512-CdzqowRJCeLU72bHvWqwRBBlLcMEtIvGrlvef74kMnV2AolS9Y8xUv1I0U/MNAWMhBlKIoyuEgoJ0t/bbwHbLQ==}
 
@@ -582,6 +589,10 @@ packages:
   postcss@8.5.15:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
+
+  protobufjs@8.6.3:
+    resolution: {integrity: sha512-alQyzT0j401LGBtwsqu6uprjR6pfNH1UJf9N6GBFMjIcd+HzTe0/HrjAbFCqun+zvnfLarrxAtMM2xvZ+kFZ5A==}
+    engines: {node: '>=12.0.0'}
 
   rollup@4.60.4:
     resolution: {integrity: sha512-WHeFSbZYsPu3+bLoNRUuAO+wavNlocOPf3wSHTP7hcFKVnJeWsYlCDbr3mTS14FCizf9ccIxXA8sGL8zKeQN3g==}
@@ -1058,6 +1069,8 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
+  long@5.3.2: {}
+
   loupe@3.2.1: {}
 
   magic-string@0.30.21:
@@ -1079,6 +1092,10 @@ snapshots:
       nanoid: 3.3.12
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  protobufjs@8.6.3:
+    dependencies:
+      long: 5.3.2
 
   rollup@4.60.4:
     dependencies:

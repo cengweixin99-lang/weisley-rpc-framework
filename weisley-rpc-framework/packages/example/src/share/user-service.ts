@@ -6,4 +6,8 @@ export type User = {
 export type UserService = {
   getUser(id: number): Promise<User>;
   listUsers(): Promise<User[]>;
+  getLargeProfile(id: number): Promise<{
+    id: number;
+    bio: string;
+  }>;
 };
