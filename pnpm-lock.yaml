@@ -21,6 +21,26 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.41)
 
+  packages/agent-contracts: {}
+
+  packages/agent-runtime:
+    dependencies:
+      '@weisley-rpc/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@weisley-rpc/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/agent-server:
+    dependencies:
+      '@weisley-rpc/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@weisley-rpc/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+
   packages/benchmark:
     dependencies:
       '@weisley-rpc/core':
