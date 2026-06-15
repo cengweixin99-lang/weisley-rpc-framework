@@ -695,12 +695,15 @@ QPS 只基于成功请求计算
 
 ## 后续优化方向
 
-- 新增 `packages/benchmark`，测试 QPS、P95/P99 延迟、JSON vs Protobuf、压缩 vs 不压缩、连接池大小影响。
-- 实现动态注册中心 `DynamicRegistry`，再扩展 Nacos / Etcd / Consul adapter。
-- 支持多 serializer 同时注册，让服务端可以同时接收 JSON 和 Protobuf。
-- 增加拦截器 interceptor，支持鉴权、日志、trace、metrics 插件化。
-- 增加 IDL 或 schema 校验，提升跨语言契约能力。
-- 基于本 RPC 框架构建多 Agent 协作应用，展示分布式应用基座价值。
+当前 RPC 核心链路、基础服务治理能力和第一阶段 benchmark 已经完成。后续更适合围绕“生产级治理能力”和“应用层场景”继续增强：
+
+- 实现动态注册中心 `DynamicRegistry`，支持服务实例动态上线、下线和订阅更新，再扩展 Nacos / Etcd / Consul adapter。
+- 优化并发 failover 策略，避免高并发重试时多个请求反复命中同一个失效 endpoint。
+- 支持多 serializer 同时注册，让服务端可以同时接收 JSON 和 Protobuf 请求。
+- 增加拦截器 interceptor，支持鉴权、日志、trace、metrics、限流和熔断的插件化组合。
+- 增加 IDL 或 schema 校验，提升跨语言契约能力和参数校验能力。
+- 增加更接近真实网络环境的 benchmark，例如跨进程、跨机器、限带宽、不同 payload 可压缩率、并发故障风暴。
+- 基于本 RPC 框架构建多 Agent 协作应用，展示 RPC 作为分布式应用通信基座的价值。
 
 ## 常用命令
 
@@ -709,6 +712,8 @@ pnpm.cmd install
 pnpm.cmd run build
 pnpm.cmd --filter @weisley-rpc/protocol test
 pnpm.cmd --filter @weisley-rpc/core test
+pnpm.cmd --filter @weisley-rpc/benchmark bench
+pnpm.cmd bench
 pnpm.cmd dev:server
 pnpm.cmd dev:client
 ```
