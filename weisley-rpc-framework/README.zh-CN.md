@@ -645,6 +645,54 @@ TCP 是字节流，不保留应用层消息边界，所以需要自定义 header
 实现服务端生命周期治理，支持 listening/draining/closed 状态切换、优雅关闭、存量请求 drain、新请求拒绝和客户端 failover，模拟生产环境服务下线场景。
 ```
 
+## Benchmark 压测
+
+当前项目已经包含独立的 `packages/benchmark` 包，用来对 RPC 框架的关键性能维度做可重复压测。
+
+当前覆盖的场景：
+
+```text
+JSON vs Protobuf       对比不同序列化方式在 small / medium / large payload 下的吞吐和延迟
+Gzip compression       对比开启 gzip 和不开启压缩的性能差异
+Connection pool        对比 maxConnectionsPerEndpoint = 1 / 2 / 4
+Discovery failover     对比健康 discovery 调用和单节点故障后的 failover 调用
+```
+
+运行方式：
+
+```bash
+pnpm.cmd bench
+```
+
+也可以只运行 benchmark 包：
+
+```bash
+pnpm.cmd --filter @weisley-rpc/benchmark build
+pnpm.cmd --filter @weisley-rpc/benchmark bench
+```
+
+报告输出位置：
+
+```text
+packages/benchmark/reports/rpc-benchmark.md
+```
+
+压测方法：
+
+```text
+每个 case 运行 3 轮
+最终结果按 median QPS 取中位数
+报告保留每轮 Round Details
+QPS 只基于成功请求计算
+延迟在客户端侧围绕一次 RPC call 统计
+```
+
+结果解读注意点：
+
+- 当前 benchmark 运行在本机 loopback 环境，gzip 的网络传输收益不明显，所以压缩结果更偏向体现 CPU 开销。
+- 当前 Protobuf serializer 使用 typed protobuf envelope，但 params/result 内部仍有 JSON 编码成本，因此不是纯 schema-level Protobuf 对比。
+- failover benchmark 使用低并发，用来隔离单次调用链路上的故障切换开销，不代表并发故障风暴场景。
+
 ## 后续优化方向
 
 - 新增 `packages/benchmark`，测试 QPS、P95/P99 延迟、JSON vs Protobuf、压缩 vs 不压缩、连接池大小影响。

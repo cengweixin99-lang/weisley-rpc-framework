@@ -1,0 +1,17 @@
+{
+  "name": "@weisley-rpc/benchmark",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "bench": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@weisley-rpc/core": "workspace:*",
+    "@weisley-rpc/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

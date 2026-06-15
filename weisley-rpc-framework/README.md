@@ -129,6 +129,15 @@ client/proxy.ts              type-safe proxy wrapper
 
 `packages/example` contains an end-to-end demo with a shared TypeScript service interface.
 
+`packages/benchmark` contains repeatable benchmark scenarios for the RPC runtime:
+
+```text
+json-vs-protobuf.bench.ts    compares JSON and Protobuf serializers
+compression.bench.ts         compares gzip and no-compression calls
+connection-pool.bench.ts     compares different maxConnectionsPerEndpoint values
+failover.bench.ts            measures discovery failover overhead
+```
+
 ## Reliability Features
 
 The current implementation includes:
@@ -313,11 +322,60 @@ Expected client output:
 ]
 ```
 
+## Benchmark
+
+The benchmark package measures the framework from several practical angles:
+
+```text
+JSON vs Protobuf       serialization cost under small, medium, and large payloads
+Gzip compression       compression overhead and latency impact
+Connection pool        maxConnectionsPerEndpoint = 1 / 2 / 4
+Discovery failover     healthy discovery vs one dead endpoint with retry failover
+```
+
+Run the benchmark:
+
+```bash
+pnpm.cmd bench
+```
+
+Or run the package directly:
+
+```bash
+pnpm.cmd --filter @weisley-rpc/benchmark build
+pnpm.cmd --filter @weisley-rpc/benchmark bench
+```
+
+The generated report is written to:
+
+```text
+packages/benchmark/reports/rpc-benchmark.md
+```
+
+Benchmark methodology:
+
+```text
+Each case runs 3 rounds
+The final result uses median QPS
+Round details are preserved in the report
+QPS is calculated from successful requests only
+Latency is measured on the client side around each RPC call
+```
+
+Notes:
+
+```text
+The benchmark runs on local loopback, so network bandwidth savings from gzip may not appear.
+The current Protobuf serializer uses a typed envelope while params/result are still JSON encoded.
+The failover benchmark uses low concurrency to isolate single-call failover overhead, not failure-storm behavior.
+```
+
 ## Useful Commands
 
 ```bash
 pnpm.cmd --filter @weisley-rpc/protocol test
 pnpm.cmd --filter @weisley-rpc/core test
+pnpm.cmd --filter @weisley-rpc/benchmark bench
 pnpm.cmd run build
 ```
 

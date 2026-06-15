@@ -6,8 +6,10 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
+    "bench": "pnpm --filter @weisley-rpc/benchmark bench",
     "dev:server": "pnpm --filter @weisley-rpc/example dev:server",
     "dev:client": "pnpm --filter @weisley-rpc/example dev:client",
+    
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
